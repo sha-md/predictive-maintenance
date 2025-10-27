@@ -37,6 +37,34 @@ def preprocess_input(df, feature_cols, scaler):
     X_scaled = scaler.transform(X)
     return X, X_scaled
 
+def auto_rename_columns(df):
+    """
+    Automatically rename columns to match model feature names.
+    Accepts spaces, underscores, lowercase, etc.
+    """
+    mapping = {
+        "air temperature [k]": "Air temperature [K]",
+        "air_temperature_k": "Air temperature [K]",
+        "process temperature [k]": "Process temperature [K]",
+        "process_temperature_k": "Process temperature [K]",
+        "rotational speed [rpm]": "Rotational speed [rpm]",
+        "rotational_speed_rpm": "Rotational speed [rpm]",
+        "torque [nm]": "Torque [Nm]",
+        "torque_nm": "Torque [Nm]",
+        "tool wear [min]": "Tool wear [min]",
+        "tool_wear_min": "Tool wear [min]",
+        "temp diff": "Temp Diff",
+        "temp_diff": "Temp Diff",
+        "type": "Type"
+    }
+    new_cols = {}
+    for c in df.columns:
+        key = c.strip().lower().replace("_"," ")
+        if key in mapping:
+            new_cols[c] = mapping[key]
+    df = df.rename(columns=new_cols)
+    return df
+
 # --------- Load artifacts ----------
 MODEL_PATH = "models/best_model.pkl"
 SCALER_PATH = "models/scaler.pkl"
@@ -57,16 +85,6 @@ metrics = {}
 if os.path.exists(METRICS_PATH):
     with open(METRICS_PATH, "r") as f:
         metrics = json.load(f)
-
-# --------- Feature name mapping ----------
-COLUMN_MAP = {
-    "Air_temperature_K": "Air temperature [K]",
-    "Process_temperature_K": "Process temperature [K]",
-    "Rotational_speed_rpm": "Rotational speed [rpm]",
-    "Torque_Nm": "Torque [Nm]",
-    "Tool_wear_min": "Tool wear [min]",
-    "Temp_Diff": "Temp Diff"
-}
 
 # --------- Header ----------
 st.title("⚙️ Predictive Maintenance — Machine Failure Predictor")
@@ -92,9 +110,8 @@ if mode == "Upload CSV":
     if uploaded_file is not None:
         try:
             input_df = pd.read_csv(uploaded_file)
-            # Rename columns to match model
-            input_df = input_df.rename(columns=COLUMN_MAP)
-            st.write("Uploaded sample:")
+            input_df = auto_rename_columns(input_df)  # <-- Automatic renaming
+            st.write("Uploaded sample after automatic column mapping:")
             st.dataframe(input_df.head())
         except Exception as e:
             st.error(f"Error reading CSV file: {e}")
@@ -105,7 +122,6 @@ if mode == "Upload CSV":
         else:
             try:
                 X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-                # Predict
                 probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
                 preds = (probs >= 0.5).astype(int)
 
@@ -141,21 +157,17 @@ else:
     st.subheader("Enter single sample values")
     
     input_data = {}
-    # Dynamically create input fields for every feature
     for feature in feature_cols:
         if feature == "Type":
             val = st.selectbox("Type", options=["H","L","M"], index=1)
             input_data[feature] = {"H":0,"L":1,"M":2}.get(val,1)
         elif feature == "Temp Diff":
-            # Compute automatically later
             continue
         else:
             val = st.number_input(feature, value=0.0)
             input_data[feature] = val
 
-    # Convert to DataFrame
     input_df = pd.DataFrame([input_data])
-    # Compute Temp Diff if missing
     if "Temp Diff" in feature_cols and "Temp Diff" not in input_df.columns:
         if "Process temperature [K]" in input_df.columns and "Air temperature [K]" in input_df.columns:
             input_df["Temp Diff"] = input_df["Process temperature [K]"] - input_df["Air temperature [K]"]
@@ -174,7 +186,6 @@ else:
             pred = int((probs >= 0.5).astype(int)[0])
             st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
 
-            # Gauge chart
             fig = go.Figure(go.Indicator(
                 mode = "gauge+number",
                 value = float(probs[0]),
