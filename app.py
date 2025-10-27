@@ -185,18 +185,4 @@ else:
         pred = int((probs >= 0.5).astype(int)[0])
         st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'}  —  Probability of failure: {probs[0]:.3f}")
 
-# -------- Feature importances ----------
-st.subheader("Model Feature Importances (if available)")
-try:
-    if hasattr(model, "feature_importances_"):
-        fi = model.feature_importances_
-        # Map to readable names (feature_cols)
-        fig, ax = plt.subplots(figsize=(6,4))
-        idx = np.argsort(fi)[::-1][:10]
-        ax.barh([feature_cols[i] for i in idx[::-1]], fi[idx[::-1]])
-        ax.set_xlabel("Importance")
-        st.pyplot(fig)
-    else:
-        st.write("Feature importances not available for this model type.")
-except Exception as e:
-    st.write("Error retrieving feature importances:", e)
+
