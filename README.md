@@ -1,6 +1,9 @@
-# predictive-maintenance
-Machine failure prediction using ML + Deep Learning
+# ⚙️ Predictive Maintenance – Machine Failure Prediction
 
+Machine failure prediction using classical ML & Deep Learning to minimize downtime and maintenance costs.
+
+## 🚀 Live Demo
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://predictive-maintenance-dh9qkfibvu76tfgm2asn2y.streamlit.app/)
 
 ## 📑 Table of Contents
 1. [Project Overview](#project-overview)  
@@ -12,73 +15,90 @@ Machine failure prediction using ML + Deep Learning
 7. [Interpretability](#interpretability)  
 8. [Streamlit App](#streamlit-app)  
 9. [Aligned Coursework](#aligned-coursework)  
-10. [How This Saves Costs](#how-this-saves-costs)  
+10. [Cost Savings Impact](#cost-savings-impact)  
 11. [Future Improvements](#future-improvements)  
+12. [Installation](#installation)  
+13. [Project Structure](#project-structure)
 
 ---
 
-## 📌 Project Overview
-This project applies **machine learning and deep learning** to predict machine failures in a manufacturing setup.  
-I built a pipeline to compare classical models (Logistic Regression, Random Forest, XGBoost, SVM, KNN) with a **Deep Neural Network (Keras)** baseline.
+## Project Overview
+This project leverages **Machine Learning** and **Deep Learning** to predict equipment failures before they happen.  
+
+I developed a full end-to-end pipeline:
+- Data cleaning, feature engineering & class balancing  
+- Model comparison between classical ML and DNN  
+- Model interpretability using feature importance  
+- Interactive web app using **:contentReference[oaicite:0]{index=0}** for real-time predictions.
+
+✅ **Goal**: Help manufacturing teams schedule preventive maintenance and avoid unplanned downtime.
 
 ---
 
-## 💼 Business Problem
-Unexpected failures → downtime, costly repairs, and safety issues.  
-Predicting failures allows manufacturers to plan **preventive maintenance** instead of reacting to breakdowns.
+## Business Problem
+Unplanned equipment failures lead to:
+- Production downtime  
+- High repair & replacement costs  
+- Worker safety risks  
+
+With a reliable **failure prediction system**, companies can:
+- Detect issues early  
+- Schedule maintenance efficiently  
+- Save operational costs  
+- Improve overall equipment effectiveness (OEE)
 
 ---
 
-## 📊 Dataset
-- **Source**: AI4I Predictive Maintenance Dataset (UCI ML Repository)  
-- ~10,000 records with features like torque, temperature, rotational speed, and tool wear  
-- Target: `Machine failure (0/1)`
+## Dataset
+- **Source**: :contentReference[oaicite:1]{index=1} (UCI ML Repository)  
+- **Size**: ~10,000 records  
+- **Features**: torque, temperature, rotational speed, tool wear, machine type, etc.  
+- **Target**: `Machine failure` (binary classification)
 
 ---
 
-## 🔍 Data Preprocessing
-- Dropped irrelevant IDs  
-- Encoded categorical feature (`Type`)  
-- Standardized continuous features  
-- Balanced classes with **SMOTE** (fixed 1:28 imbalance)  
+## Data Preprocessing
+- Dropped non-predictive IDs  
+- Encoded categorical variable (`Type`)  
+- Standardized continuous features with `StandardScaler`  
+- Fixed class imbalance using **:contentReference[oaicite:2]{index=2}**  
+- Engineered `Temp Diff` (Process − Air temperature)
 
 ---
 
-## 🤖 Modeling
-Models implemented:
-- Logistic Regression  
-- Random Forest  
-- XGBoost  
-- KNN  
-- SVM  
-- **Deep Neural Network (Keras)**
+## Modeling
+I trained and compared several ML models along with a DNN baseline:
 
-| Model               | Accuracy | F1 Score |
-|----------------------|----------|----------|
-| Logistic Regression  | 0.82     | 0.82     |
-| Random Forest        | 0.99     | 0.99     |
-| XGBoost              | 0.99     | 0.99     |
-| KNN                  | 0.96     | 0.96     |
-| SVM                  | 0.95     | 0.95     |
-| **DNN (Keras)**      | **0.96** | **0.96** |
+| Model                  | Accuracy | F1 Score |
+|--------------------------|----------|----------|
+| Logistic Regression      | 0.82     | 0.82     |
+| Random Forest            | 0.99     | 0.99     |
+| XGBoost                  | 0.99     | 0.99     |
+| KNN                      | 0.96     | 0.96     |
+| SVM                      | 0.95     | 0.95     |
+| **DNN (Keras)**          | **0.96** | **0.96** |
+
+🟢 **Best performer**: Tree-based models (Random Forest & XGBoost)  
+⚡ DNN also showed competitive performance.
 
 ---
 
-## 📈 Results
-- Best: **Tree-based models** (RF, XGBoost)  
-- DNN competitive with strong performance  
-- Confusion Matrix shows very few false negatives (key for safety)  
+## Results
+- Very high classification accuracy  
+- **Low false negatives** — critical for safety  
+- Confusion matrix confirmed strong predictive performance  
+- Consistent results after cross-validation
 
 ---
 
-## 🔎 Interpretability
-- Feature importances from RF & XGBoost  
-- DNN visualized with training loss/accuracy curves  
+## Interpretability
+- Feature importance analysis showed:
+  - **Torque** and **Tool wear** were strong failure indicators  
+- Training curves (DNN) confirmed good convergence without overfitting
 
 ---
 
-## 🌐 Streamlit App
-Interactive demo:  
+## Streamlit App
+An interactive web application built with **:contentReference[oaicite:3]{index=3}**.  
 
-```bash
-streamlit run app.py
+
