@@ -1,188 +1,230 @@
-# app.py
+# ======================================================
+# ⚙️ Predictive Maintenance Dashboard
+# ======================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib, json, os
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
-st.set_page_config(page_title="Predictive Maintenance", layout="wide")
+# ----------------- PAGE CONFIG -----------------
+st.set_page_config(
+    page_title="⚙️ Predictive Maintenance Dashboard",
+    page_icon="🧠",
+    layout="wide"
+)
 
-# --------- Utilities ----------
-def clean_colname(c):
-    # same cleaning as training pipeline: remove brackets and replace spaces
+# ----------------- UTILITIES -----------------
+def clean_colname(c: str) -> str:
+    """Clean column names consistently with training pipeline."""
     return c.replace(" ", "_").replace("[","").replace("]","").replace("<","lt").replace(">","gt")
 
-def preprocess_input(df, feature_cols, scaler):
-    # ensure columns cleaned and present
+@st.cache_resource
+def load_artifacts():
+    """Load model, scaler, and metadata artifacts."""
+    model_path = "models/best_model.pkl"
+    scaler_path = "models/scaler.pkl"
+    features_path = "models/feature_columns.json"
+    metrics_path = "models/metrics.json"
+
+    if not os.path.exists(model_path):
+        st.error("🚨 Model not found! Please train and save model artifacts in /models.")
+        st.stop()
+
+    model = joblib.load(model_path)
+    scaler = joblib.load(scaler_path) if os.path.exists(scaler_path) else None
+
+    with open(features_path, "r") as f:
+        feature_cols = json.load(f)
+
+    metrics = {}
+    if os.path.exists(metrics_path):
+        with open(metrics_path, "r") as f:
+            metrics = json.load(f)
+
+    return model, scaler, feature_cols, metrics
+
+
+def preprocess_input(df: pd.DataFrame, feature_cols: list, scaler):
+    """Clean and scale input features."""
     df = df.copy()
-    # unify column names
     df.columns = [clean_colname(c) for c in df.columns]
-    # Engineer TempDiff if not present
-    if ("Process_temperature_K" in feature_cols or "Process_temperature_[K]" in feature_cols):
-        # try many name variants; assume original names replaced in saved feature_cols
-        pass
-    # create temp diff using likely column name variants
-    candidates_air = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
-    candidates_proc = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
-    if "Temp Diff" not in df.columns and len(candidates_air) and len(candidates_proc):
-        df["Temp_Diff"] = df[candidates_proc[0]] - df[candidates_air[0]]
-    # ensure all expected feature columns exist (fill missing with 0)
-    X = pd.DataFrame(columns=feature_cols)
-    for col in feature_cols:
-        if col in df.columns:
-            X[col] = df[col]
-        else:
-            X[col] = 0.0
-    # scale using loaded scaler (expects same order)
-    X_scaled = scaler.transform(X)
+
+    # Create engineered features
+    air_col = next((c for c in df.columns if "air" in c.lower() and "temp" in c.lower()), None)
+    proc_col = next((c for c in df.columns if "process" in c.lower() and "temp" in c.lower()), None)
+    if air_col and proc_col and "Temp_Diff" not in df.columns:
+        df["Temp_Diff"] = df[proc_col] - df[air_col]
+
+    # Ensure all expected features exist
+    X = pd.DataFrame({col: df[col] if col in df.columns else 0.0 for col in feature_cols})
+    X_scaled = scaler.transform(X) if scaler is not None else X
     return X, X_scaled
 
-# --------- Load artifacts ----------
-MODEL_PATH = "models/best_model.pkl"
-SCALER_PATH = "models/scaler.pkl"
-FEATURES_PATH = "models/feature_columns.json"
-METRICS_PATH = "models/metrics.json"
 
-if not os.path.exists(MODEL_PATH):
-    st.error(f"Model not found at {MODEL_PATH}. Please run training notebook cell that saves artifacts.")
-    st.stop()
+def predict(model, X_scaled):
+    """Generate predictions and probabilities."""
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(X_scaled)[:, 1]
+    else:
+        try:
+            probs = model.decision_function(X_scaled)
+            probs = (probs - probs.min()) / (probs.max() - probs.min() + 1e-9)
+        except:
+            probs = model.predict(X_scaled)
+    preds = (probs >= 0.5).astype(int)
+    return preds, probs
 
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH) if os.path.exists(SCALER_PATH) else None
 
-with open(FEATURES_PATH, "r") as f:
-    feature_cols = json.load(f)
+# ----------------- LOAD ARTIFACTS -----------------
+model, scaler, feature_cols, metrics = load_artifacts()
 
-metrics = {}
-if os.path.exists(METRICS_PATH):
-    with open(METRICS_PATH, "r") as f:
-        metrics = json.load(f)
-
-# display header
+# ----------------- HEADER -----------------
 st.title("⚙️ Predictive Maintenance — Machine Failure Predictor")
-st.markdown("Upload sensor data or enter a single record. Model predicts probability of machine failure.")
+st.markdown("Predict **machine failure probability** using sensor data. Upload your dataset or test a single record.")
 
-# sidebar show model metrics
-st.sidebar.header("Model Metrics")
+# Sidebar
+st.sidebar.header("📊 Model Information")
 if metrics:
-    # metrics is a dict of dicts; display best metric quickly
-    try:
-        # show best model and its F1 from metrics file
-        df_metrics = pd.DataFrame(metrics)
-        st.sidebar.dataframe(df_metrics.T)
-    except:
-        st.sidebar.write(metrics)
+    df_metrics = pd.DataFrame(metrics).T
+    st.sidebar.dataframe(df_metrics)
 else:
-    st.sidebar.write("No metrics.json found.")
+    st.sidebar.warning("No metrics.json found.")
+st.sidebar.info(f"Model: `{os.path.basename('models/best_model.pkl')}`")
 
-# --------- Input modes ----------
-mode = st.sidebar.radio("Input Mode", ("Upload CSV", "Single Record"))
+mode = st.sidebar.radio("Choose Input Mode:", ["Upload CSV", "Single Record"])
 
+# =====================================================
+# 📁 UPLOAD CSV MODE
+# =====================================================
 if mode == "Upload CSV":
-    uploaded_file = st.file_uploader("Upload CSV with sensor readings (first row = header)", type=["csv"])
-    if uploaded_file is not None:
-        input_df = pd.read_csv(uploaded_file)
-        st.write("Uploaded sample:")
-        st.dataframe(input_df.head())
-        if scaler is None:
-            st.error("Scaler not found. Cannot preprocess. Save scaler as models/scaler.pkl in your repo.")
-        else:
-            X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-            # predict
-            if hasattr(model, "predict_proba"):
-                probs = model.predict_proba(X_scaled)[:,1]
-            else:
-                # fallback to predict
-                preds = model.predict(X_scaled)
-                probs = preds
-            preds = (probs >= 0.5).astype(int)
-            out = input_df.copy()
-            out["failure_prob"] = probs
-            out["predicted_failure"] = preds
-            st.subheader("Predictions (first 20 rows)")
-            st.dataframe(out.head(20))
-            # show distribution
-            st.subheader("Predicted failure probability distribution")
-            st.bar_chart(pd.Series(probs).value_counts().sort_index())
+    uploaded_file = st.file_uploader("📁 Upload CSV file with sensor readings", type=["csv"])
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
+        st.write("Preview of uploaded data:")
+        st.dataframe(df.head())
 
+        X_raw, X_scaled = preprocess_input(df, feature_cols, scaler)
+        preds, probs = predict(model, X_scaled)
+
+        result = df.copy()
+        result["Failure_Probability"] = probs
+        result["Predicted_Failure"] = preds
+
+        # KPI summary
+        st.markdown("### 📈 Prediction Summary")
+        col1, col2, col3 = st.columns(3)
+        total = len(result)
+        failures = result["Predicted_Failure"].sum()
+        col1.metric("Total Machines", total)
+        col2.metric("Predicted Failures", failures)
+        col3.metric("Failure Rate", f"{(failures / total) * 100:.1f}%")
+
+        # --- Graph 1: Failure Counts ---
+        st.markdown("### ⚙️ Failure Count Overview")
+        fail_counts = result["Predicted_Failure"].value_counts().sort_index()
+        labels = ["No Failure", "Failure"]
+        fig1, ax1 = plt.subplots(figsize=(6, 4))
+        ax1.bar(labels, fail_counts, color=["#2ecc71", "#e74c3c"])
+        ax1.set_ylabel("Number of Samples")
+        ax1.set_title("Machine Failure Prediction Counts")
+        st.pyplot(fig1)
+
+        # --- Graph 2: Probability Distribution ---
+        st.markdown("### 📊 Failure Probability Distribution")
+        fig2, ax2 = plt.subplots(figsize=(6, 4))
+        ax2.hist(result["Failure_Probability"], bins=20, color="#3498db", alpha=0.7)
+        ax2.set_xlabel("Predicted Failure Probability")
+        ax2.set_ylabel("Count")
+        ax2.set_title("Failure Probability Histogram")
+        st.pyplot(fig2)
+
+        # --- Download predictions ---
+        st.download_button("📥 Download Predictions", result.to_csv(index=False).encode(), "predictions.csv", "text/csv")
+
+
+# =====================================================
+# 🧮 SINGLE RECORD MODE
+# =====================================================
 else:
-    # Single record entry
-    st.subheader("Enter single sample values")
-    
-    sample_path = "models/sample_input.csv"
-    sample_vals = {}
-    if os.path.exists(sample_path):
-        sample = pd.read_csv(sample_path)
-        sample0 = sample.iloc[0].to_dict()
-        sample_vals = sample0
+    st.markdown("### 🔧 Enter Machine Sensor Readings")
 
-    def input_number(name, key, default=0.0):
-        return st.number_input(name, key=key, value=float(sample_vals.get(name, default)))
+    with st.form("single_input"):
+        c1, c2, c3 = st.columns(3)
+        air_temp = c1.number_input("Air Temperature (K)", value=298.2)
+        proc_temp = c2.number_input("Process Temperature (K)", value=308.6)
+        rpm = c3.number_input("Rotational Speed (rpm)", value=1400)
+        torque = c1.number_input("Torque (Nm)", value=45.0)
+        wear = c2.number_input("Tool Wear (min)", value=5.0)
+        type_val = c3.selectbox("Machine Type", ["L", "M", "H"], index=1)
+        submitted = st.form_submit_button("🔮 Predict")
 
-    # Try to find likely keys in feature_cols (loose mapping)
-    # We'll create inputs with friendly labels
-    at_name = next((c for c in feature_cols if "Air" in c or "air" in c), feature_cols[0])
-    pt_name = next((c for c in feature_cols if "Process" in c or "process" in c), feature_cols[1] if len(feature_cols)>1 else feature_cols[0])
-    rpm_name = next((c for c in feature_cols if "rpm" in c.lower()), feature_cols[2] if len(feature_cols)>2 else feature_cols[0])
-    torque_name = next((c for c in feature_cols if "Torque" in c or "torque" in c), feature_cols[3] if len(feature_cols)>3 else feature_cols[0])
-    wear_name = next((c for c in feature_cols if "wear" in c.lower()), feature_cols[4] if len(feature_cols)>4 else feature_cols[0])
-    # Show inputs:
-    air_temp = st.number_input(f"{at_name}", value=float(sample_vals.get(at_name, 298.2)))
-    proc_temp = st.number_input(f"{pt_name}", value=float(sample_vals.get(pt_name, 308.6)))
-    rpm = st.number_input(f"{rpm_name}", value=float(sample_vals.get(rpm_name, 1400)))
-    torque = st.number_input(f"{torque_name}", value=float(sample_vals.get(torque_name, 45.0)))
-    wear = st.number_input(f"{wear_name}", value=float(sample_vals.get(wear_name, 5.0)))
-    # type
-    type_label = None
-    type_candidates = [c for c in feature_cols if "Type" in c or "type" in c]
-    if type_candidates:
-        type_label = type_candidates[0]
-        type_val = st.selectbox("Type (if used in your model)", options=["L","M","H"], index=1)
-    else:
-        type_val = None
+    if submitted:
+        row = {col: 0.0 for col in feature_cols}
+        mapping = {"H": 0, "L": 1, "M": 2}
 
-    
-    row = {}
-    for c in feature_cols:
-        row[c] = 0.0
-    # set values by matching names (best-effort)
-    # try to set matching keys
-    def set_by_like(key_candidates, val):
         for col in feature_cols:
-            if any(k.lower() in col.lower() for k in key_candidates):
-                row[col] = val
-                return True
-        return False
+            if "air" in col.lower(): row[col] = air_temp
+            elif "process" in col.lower(): row[col] = proc_temp
+            elif "rpm" in col.lower(): row[col] = rpm
+            elif "torque" in col.lower(): row[col] = torque
+            elif "wear" in col.lower(): row[col] = wear
+            elif "type" in col.lower(): row[col] = mapping[type_val]
 
-    set_by_like(["air","Air","air_temperature","air_temp"], air_temp)
-    set_by_like(["process","Process","process_temperature","process_temp"], proc_temp)
-    set_by_like(["rotational","rpm"], rpm)
-    set_by_like(["torque"], torque)
-    set_by_like(["wear","tool_wear"], wear)
-    if type_val and type_label in feature_cols:
-        
-        mapping = {"H":0, "L":1, "M":2}
-        row[type_label] = mapping.get(type_val, 1)
+        df_input = pd.DataFrame([row])
+        _, X_scaled = preprocess_input(df_input, feature_cols, scaler)
+        preds, probs = predict(model, X_scaled)
 
-    input_df = pd.DataFrame([row])
-    st.write("Input features used for prediction:")
-    st.dataframe(input_df.T)
+        pred = preds[0]
+        prob = float(probs[0])
+        st.success(f"Predicted: {'⚠️ FAILURE' if pred==1 else '✅ No Failure'} — Probability: {prob:.2f}")
 
-    if scaler is None:
-        st.error("Scaler not found. Save `models/scaler.pkl` in repo.")
-    else:
-        X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(X_scaled)[:,1]
-        else:
-            try:
-                probs = model.decision_function(X_scaled)
-                # normalize to 0-1
-                probs = (probs - probs.min()) / (probs.max() - probs.min() + 1e-9)
-            except:
-                preds = model.predict(X_scaled)
-                probs = preds
-        pred = int((probs >= 0.5).astype(int)[0])
-        st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'}  —  Probability of failure: {probs[0]:.3f}")
+        # ------------------- GAUGE VISUALIZATION -------------------
+        st.markdown("### 🧭 Machine Health Gauge")
+        prob_percent = prob * 100
 
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number+delta",
+            value=prob_percent,
+            number={'suffix': "%"},
+            delta={'reference': 50, 'increasing': {'color': "red"}, 'decreasing': {'color': "green"}},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'bar': {'color': "darkred" if prob_percent > 50 else "green"},
+                'steps': [
+                    {'range': [0, 30], 'color': '#2ecc71'},
+                    {'range': [30, 70], 'color': '#f1c40f'},
+                    {'range': [70, 100], 'color': '#e74c3c'}
+                ],
+                'threshold': {'line': {'color': "black", 'width': 4}, 'thickness': 0.8, 'value': prob_percent}
+            },
+            title={'text': "Failure Probability", 'font': {'size': 20}}
+        ))
 
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.plotly_chart(fig, use_container_width=True)
+
+        # ------------------- OPTIONAL: MULTI-GAUGE DASHBOARD -------------------
+        st.markdown("### ⚙️ Sensor Overview Dashboard")
+
+        gauges = {
+            "Air Temperature (K)": air_temp,
+            "Process Temperature (K)": proc_temp,
+            "Rotational Speed (rpm)": rpm,
+            "Torque (Nm)": torque,
+            "Tool Wear (min)": wear
+        }
+
+        cols = st.columns(len(gauges))
+        for (label, val), col in zip(gauges.items(), cols):
+            with col:
+                fig_sensor = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=val,
+                    title={'text': label},
+                    gauge={'axis': {'range': [0, val * 1.5]}, 'bar': {'color': "#3498db"}}
+                ))
+                st.plotly_chart(fig_sensor, use_container_width=True)
