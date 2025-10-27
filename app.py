@@ -14,27 +14,33 @@ def preprocess_input(df, feature_cols, scaler):
 
     # Compute Temp Diff if missing
     if "Temp Diff" in feature_cols and "Temp Diff" not in df.columns:
-        air_col = [c for c in df.columns if "Air" in c][0] if any("Air" in c for c in df.columns) else None
-        proc_col = [c for c in df.columns if "Process" in c][0] if any("Process" in c for c in df.columns) else None
-        if air_col and proc_col:
-            df["Temp Diff"] = df[proc_col] - df[air_col]
-        else:
-            df["Temp Diff"] = 0.0
+        air_col  = next((c for c in df.columns if "Air" in c), None)
+        proc_col = next((c for c in df.columns if "Process" in c), None)
+        df["Temp Diff"] = (df[proc_col] - df[air_col]) if (air_col and proc_col) else 0.0
 
-    # Map Type column to numeric
-    if "Type" in df.columns:
-        df["Type"] = df["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
+    # Map Type column to numeric (match training)
+    if "Type" in df.columns and df["Type"].dtype == object:
+        df["Type"] = df["Type"].replace({"H":0,"L":1,"M":2})
 
-    # Fill missing columns with 0
-    for col in feature_cols:
-        if col not in df.columns:
-            df[col] = 0.0
+    # Decide the exact column order to use:
+    # If the scaler was fit on a DataFrame, it will expose feature_names_in_.
+    # Prefer that order; otherwise fall back to feature_cols from JSON.
+    if hasattr(scaler, "feature_names_in_"):
+        expected_order = list(scaler.feature_names_in_)
+    else:
+        expected_order = list(feature_cols)
 
-    # Keep only columns in feature_cols in correct order
-    X = df[feature_cols]
+    # Build X in the expected order, filling missing with 0.0
+    X = df.reindex(columns=expected_order, fill_value=0.0)
 
-    # Scale
-    X_scaled = scaler.transform(X)
+    # Ensure numeric dtype
+    for c in X.columns:
+        X[c] = pd.to_numeric(X[c], errors="coerce")
+    X = X.fillna(0.0)
+
+    # KEY: pass ndarray to bypass sklearn's feature-name check
+    X_scaled = scaler.transform(X.values.astype(float))
+
     return X, X_scaled
 
 def auto_rename_columns(df):
