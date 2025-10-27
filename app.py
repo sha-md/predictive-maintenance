@@ -180,8 +180,8 @@ else:
         else:
             input_df["Temp Diff"] = 0.0
 
-    st.write("Input features used for prediction:")
-    st.dataframe(input_df.T)
+    #st.write("Input features used for prediction:")
+    #st.dataframe(input_df.T)
 
     if scaler is None:
         st.error("Scaler not found.")
