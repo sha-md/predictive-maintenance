@@ -3,39 +3,67 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib, json, os
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Predictive Maintenance", layout="wide")
 
 # --------- Utilities ----------
-def clean_colname(c):
-    # same cleaning as training pipeline: remove brackets and replace spaces
-    return c.replace(" ", "_").replace("[","").replace("]","").replace("<","lt").replace(">","gt")
-
 def preprocess_input(df, feature_cols, scaler):
-    # ensure columns cleaned and present
+    """Prepare input dataframe for model prediction with original feature names"""
     df = df.copy()
-    # unify column names
-    df.columns = [clean_colname(c) for c in df.columns]
-    # Engineer TempDiff if not present
-    if ("Process_temperature_K" in feature_cols or "Process_temperature_[K]" in feature_cols):
-        # try many name variants; assume original names replaced in saved feature_cols
-        pass
-    # create temp diff using likely column name variants
-    candidates_air = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
-    candidates_proc = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
-    if "Temp Diff" not in df.columns and len(candidates_air) and len(candidates_proc):
-        df["Temp_Diff"] = df[candidates_proc[0]] - df[candidates_air[0]]
-    # ensure all expected feature columns exist (fill missing with 0)
-    X = pd.DataFrame(columns=feature_cols)
-    for col in feature_cols:
-        if col in df.columns:
-            X[col] = df[col]
+
+    # Compute Temp Diff if missing
+    if "Temp Diff" in feature_cols and "Temp Diff" not in df.columns:
+        air_col = [c for c in df.columns if "Air" in c][0] if any("Air" in c for c in df.columns) else None
+        proc_col = [c for c in df.columns if "Process" in c][0] if any("Process" in c for c in df.columns) else None
+        if air_col and proc_col:
+            df["Temp Diff"] = df[proc_col] - df[air_col]
         else:
-            X[col] = 0.0
-    # scale using loaded scaler (expects same order)
+            df["Temp Diff"] = 0.0
+
+    # Map Type column to numeric
+    if "Type" in df.columns:
+        df["Type"] = df["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
+
+    # Fill missing columns with 0
+    for col in feature_cols:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    # Keep only columns in feature_cols in correct order
+    X = df[feature_cols]
+
+    # Scale
     X_scaled = scaler.transform(X)
     return X, X_scaled
+
+def auto_rename_columns(df):
+    """
+    Automatically rename columns to match model feature names.
+    Accepts spaces, underscores, lowercase, etc.
+    """
+    mapping = {
+        "air temperature [k]": "Air temperature [K]",
+        "air_temperature_k": "Air temperature [K]",
+        "process temperature [k]": "Process temperature [K]",
+        "process_temperature_k": "Process temperature [K]",
+        "rotational speed [rpm]": "Rotational speed [rpm]",
+        "rotational_speed_rpm": "Rotational speed [rpm]",
+        "torque [nm]": "Torque [Nm]",
+        "torque_nm": "Torque [Nm]",
+        "tool wear [min]": "Tool wear [min]",
+        "tool_wear_min": "Tool wear [min]",
+        "temp diff": "Temp Diff",
+        "temp_diff": "Temp Diff",
+        "type": "Type"
+    }
+    new_cols = {}
+    for c in df.columns:
+        key = c.strip().lower().replace("_"," ")
+        if key in mapping:
+            new_cols[c] = mapping[key]
+    df = df.rename(columns=new_cols)
+    return df
 
 # --------- Load artifacts ----------
 MODEL_PATH = "models/best_model.pkl"
@@ -44,7 +72,7 @@ FEATURES_PATH = "models/feature_columns.json"
 METRICS_PATH = "models/metrics.json"
 
 if not os.path.exists(MODEL_PATH):
-    st.error(f"Model not found at {MODEL_PATH}. Please run training notebook cell that saves artifacts.")
+    st.error(f"Model not found at {MODEL_PATH}. Run the training notebook first.")
     st.stop()
 
 model = joblib.load(MODEL_PATH)
@@ -58,16 +86,14 @@ if os.path.exists(METRICS_PATH):
     with open(METRICS_PATH, "r") as f:
         metrics = json.load(f)
 
-# display header
+# --------- Header ----------
 st.title("⚙️ Predictive Maintenance — Machine Failure Predictor")
 st.markdown("Upload sensor data or enter a single record. Model predicts probability of machine failure.")
 
-# sidebar show model metrics
+# Sidebar metrics
 st.sidebar.header("Model Metrics")
 if metrics:
-    # metrics is a dict of dicts; display best metric quickly
     try:
-        # show best model and its F1 from metrics file
         df_metrics = pd.DataFrame(metrics)
         st.sidebar.dataframe(df_metrics.T)
     except:
@@ -75,112 +101,102 @@ if metrics:
 else:
     st.sidebar.write("No metrics.json found.")
 
-# --------- Input modes ----------
+# --------- Input Mode ----------
 mode = st.sidebar.radio("Input Mode", ("Upload CSV", "Single Record"))
 
+# ------------------ CSV Upload ------------------
 if mode == "Upload CSV":
     uploaded_file = st.file_uploader("Upload CSV with sensor readings (first row = header)", type=["csv"])
     if uploaded_file is not None:
-        input_df = pd.read_csv(uploaded_file)
-        st.write("Uploaded sample:")
-        st.dataframe(input_df.head())
-        if scaler is None:
-            st.error("Scaler not found. Cannot preprocess. Save scaler as models/scaler.pkl in your repo.")
-        else:
-            X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-            # predict
-            if hasattr(model, "predict_proba"):
-                probs = model.predict_proba(X_scaled)[:,1]
-            else:
-                # fallback to predict
-                preds = model.predict(X_scaled)
-                probs = preds
-            preds = (probs >= 0.5).astype(int)
-            out = input_df.copy()
-            out["failure_prob"] = probs
-            out["predicted_failure"] = preds
-            st.subheader("Predictions (first 20 rows)")
-            st.dataframe(out.head(20))
-            # show distribution
-            st.subheader("Predicted failure probability distribution")
-            st.bar_chart(pd.Series(probs).value_counts().sort_index())
+        try:
+            input_df = pd.read_csv(uploaded_file)
+            input_df = auto_rename_columns(input_df)  # <-- Automatic renaming
+            st.write("Uploaded sample after automatic column mapping:")
+            st.dataframe(input_df.head())
+        except Exception as e:
+            st.error(f"Error reading CSV file: {e}")
+            st.stop()
 
+        if scaler is None:
+            st.error("Scaler not found. Cannot preprocess.")
+        else:
+            try:
+                X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
+                probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
+                preds = (probs >= 0.5).astype(int)
+
+                out = input_df.copy()
+                out["failure_prob"] = probs
+                out["predicted_failure"] = preds
+                st.subheader("Predictions (first 20 rows)")
+                st.dataframe(out.head(20))
+
+                # Probability distribution
+                st.subheader("Predicted failure probability distribution")
+                st.bar_chart(pd.Series(probs).value_counts().sort_index())
+
+                # Gauge for average probability
+                avg_prob = probs.mean()
+                fig = go.Figure(go.Indicator(
+                    mode = "gauge+number",
+                    value = float(avg_prob),
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Average Failure Probability"},
+                    gauge = {'axis': {'range': [0, 1]},
+                             'bar': {'color': "red"},
+                             'steps' : [
+                                 {'range': [0, 0.5], 'color': "green"},
+                                 {'range': [0.5, 0.8], 'color': "yellow"},
+                                 {'range': [0.8, 1], 'color': "red"}]}))
+                st.plotly_chart(fig)
+            except Exception as e:
+                st.error(f"Error during preprocessing or prediction: {e}")
+
+# ------------------ Single Record ------------------
 else:
-    # Single record entry
     st.subheader("Enter single sample values")
     
-    sample_path = "models/sample_input.csv"
-    sample_vals = {}
-    if os.path.exists(sample_path):
-        sample = pd.read_csv(sample_path)
-        sample0 = sample.iloc[0].to_dict()
-        sample_vals = sample0
+    input_data = {}
+    for feature in feature_cols:
+        if feature == "Type":
+            val = st.selectbox("Type", options=["H","L","M"], index=1)
+            input_data[feature] = {"H":0,"L":1,"M":2}.get(val,1)
+        elif feature == "Temp Diff":
+            continue
+        else:
+            val = st.number_input(feature, value=0.0)
+            input_data[feature] = val
 
-    def input_number(name, key, default=0.0):
-        return st.number_input(name, key=key, value=float(sample_vals.get(name, default)))
+    input_df = pd.DataFrame([input_data])
+    if "Temp Diff" in feature_cols and "Temp Diff" not in input_df.columns:
+        if "Process temperature [K]" in input_df.columns and "Air temperature [K]" in input_df.columns:
+            input_df["Temp Diff"] = input_df["Process temperature [K]"] - input_df["Air temperature [K]"]
+        else:
+            input_df["Temp Diff"] = 0.0
 
-    # Try to find likely keys in feature_cols (loose mapping)
-    # We'll create inputs with friendly labels
-    at_name = next((c for c in feature_cols if "Air" in c or "air" in c), feature_cols[0])
-    pt_name = next((c for c in feature_cols if "Process" in c or "process" in c), feature_cols[1] if len(feature_cols)>1 else feature_cols[0])
-    rpm_name = next((c for c in feature_cols if "rpm" in c.lower()), feature_cols[2] if len(feature_cols)>2 else feature_cols[0])
-    torque_name = next((c for c in feature_cols if "Torque" in c or "torque" in c), feature_cols[3] if len(feature_cols)>3 else feature_cols[0])
-    wear_name = next((c for c in feature_cols if "wear" in c.lower()), feature_cols[4] if len(feature_cols)>4 else feature_cols[0])
-    # Show inputs:
-    air_temp = st.number_input(f"{at_name}", value=float(sample_vals.get(at_name, 298.2)))
-    proc_temp = st.number_input(f"{pt_name}", value=float(sample_vals.get(pt_name, 308.6)))
-    rpm = st.number_input(f"{rpm_name}", value=float(sample_vals.get(rpm_name, 1400)))
-    torque = st.number_input(f"{torque_name}", value=float(sample_vals.get(torque_name, 45.0)))
-    wear = st.number_input(f"{wear_name}", value=float(sample_vals.get(wear_name, 5.0)))
-    # type
-    type_label = None
-    type_candidates = [c for c in feature_cols if "Type" in c or "type" in c]
-    if type_candidates:
-        type_label = type_candidates[0]
-        type_val = st.selectbox("Type (if used in your model)", options=["L","M","H"], index=1)
-    else:
-        type_val = None
-
-    
-    row = {}
-    for c in feature_cols:
-        row[c] = 0.0
-    # set values by matching names (best-effort)
-    # try to set matching keys
-    def set_by_like(key_candidates, val):
-        for col in feature_cols:
-            if any(k.lower() in col.lower() for k in key_candidates):
-                row[col] = val
-                return True
-        return False
-
-    set_by_like(["air","Air","air_temperature","air_temp"], air_temp)
-    set_by_like(["process","Process","process_temperature","process_temp"], proc_temp)
-    set_by_like(["rotational","rpm"], rpm)
-    set_by_like(["torque"], torque)
-    set_by_like(["wear","tool_wear"], wear)
-    if type_val and type_label in feature_cols:
-        
-        mapping = {"H":0, "L":1, "M":2}
-        row[type_label] = mapping.get(type_val, 1)
-
-    input_df = pd.DataFrame([row])
     st.write("Input features used for prediction:")
     st.dataframe(input_df.T)
 
     if scaler is None:
-        st.error("Scaler not found. Save `models/scaler.pkl` in repo.")
+        st.error("Scaler not found.")
     else:
-        X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(X_scaled)[:,1]
-        else:
-            try:
-                probs = model.decision_function(X_scaled)
-                # normalize to 0-1
-                probs = (probs - probs.min()) / (probs.max() - probs.min() + 1e-9)
-            except:
-                preds = model.predict(X_scaled)
-                probs = preds
-        pred = int((probs >= 0.5).astype(int)[0])
-        st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'}  —  Probability of failure: {probs[0]:.3f}")
+        try:
+            X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
+            probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
+            pred = int((probs >= 0.5).astype(int)[0])
+            st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
+
+            fig = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = float(probs[0]),
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "Failure Probability"},
+                gauge = {'axis': {'range': [0, 1]},
+                         'bar': {'color': "red"},
+                         'steps' : [
+                             {'range': [0, 0.5], 'color': "green"},
+                             {'range': [0.5, 0.8], 'color': "yellow"},
+                             {'range': [0.8, 1], 'color': "red"}]}))
+            st.plotly_chart(fig)
+        except Exception as e:
+            st.error(f"Error during preprocessing or prediction: {e}")
