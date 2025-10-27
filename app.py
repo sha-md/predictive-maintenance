@@ -12,40 +12,31 @@ def clean_colname(c):
     return c.replace(" ", "_").replace("[","").replace("]","").replace("<","lt").replace(">","gt")
 
 def preprocess_input(df, feature_cols, scaler):
-    """
-    Preprocess input DataFrame to match training features:
-    - Cleans column names
-    - Adds missing features with 0
-    - Computes Temp_Diff if needed
-    - Maps Type H/L/M to numeric
-    - Scales features
-    """
+    """Prepare input dataframe for model prediction"""
     df = df.copy()
     df.columns = [clean_colname(c) for c in df.columns]
 
-    # Compute Temp_Diff if not present
+    # Create Temp_Diff if possible
     if "Temp_Diff" not in df.columns:
         air_cols = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
         proc_cols = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
         if air_cols and proc_cols:
             df["Temp_Diff"] = df[proc_cols[0]] - df[air_cols[0]]
 
-    # Ensure all feature columns exist
-    X = pd.DataFrame(columns=feature_cols)
-    for col in feature_cols:
-        if col in df.columns:
-            X[col] = df[col]
-        else:
-            X[col] = 0.0
+    # Map Type to numeric if exists
+    if "Type" in df.columns:
+        df["Type"] = df["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
 
-    # Map Type column if exists
-    if "Type" in X.columns:
-        X["Type"] = X["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
+    # Warn if columns are missing or extra
+    missing_cols = [c for c in feature_cols if c not in df.columns]
+    extra_cols = [c for c in df.columns if c not in feature_cols]
+    if missing_cols:
+        st.warning(f"Missing columns in input. Filled with 0: {missing_cols}")
+    if extra_cols:
+        st.warning(f"Ignored extra columns: {extra_cols}")
 
-    # Fill NaNs
-    X = X.fillna(0)
-
-    # Scale
+    # Reindex to match training features exactly
+    X = df.reindex(columns=feature_cols, fill_value=0.0)
     X_scaled = scaler.transform(X)
     return X, X_scaled
 
@@ -56,7 +47,7 @@ FEATURES_PATH = "models/feature_columns.json"
 METRICS_PATH = "models/metrics.json"
 
 if not os.path.exists(MODEL_PATH):
-    st.error(f"Model not found at {MODEL_PATH}. Please run training notebook.")
+    st.error(f"Model not found at {MODEL_PATH}. Run the training notebook first.")
     st.stop()
 
 model = joblib.load(MODEL_PATH)
@@ -92,34 +83,95 @@ mode = st.sidebar.radio("Input Mode", ("Upload CSV", "Single Record"))
 if mode == "Upload CSV":
     uploaded_file = st.file_uploader("Upload CSV with sensor readings (first row = header)", type=["csv"])
     if uploaded_file is not None:
-        input_df = pd.read_csv(uploaded_file)
-        st.write("Uploaded sample:")
-        st.dataframe(input_df.head())
+        try:
+            input_df = pd.read_csv(uploaded_file)
+            st.write("Uploaded sample:")
+            st.dataframe(input_df.head())
+        except Exception as e:
+            st.error(f"Error reading CSV file: {e}")
+            st.stop()
 
         if scaler is None:
             st.error("Scaler not found. Cannot preprocess.")
         else:
+            try:
+                X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
+                # Predict
+                probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
+                preds = (probs >= 0.5).astype(int)
+
+                out = input_df.copy()
+                out["failure_prob"] = probs
+                out["predicted_failure"] = preds
+                st.subheader("Predictions (first 20 rows)")
+                st.dataframe(out.head(20))
+
+                # Probability distribution
+                st.subheader("Predicted failure probability distribution")
+                st.bar_chart(pd.Series(probs).value_counts().sort_index())
+
+                # Gauge for average probability
+                avg_prob = probs.mean()
+                fig = go.Figure(go.Indicator(
+                    mode = "gauge+number",
+                    value = float(avg_prob),
+                    domain = {'x': [0, 1], 'y': [0, 1]},
+                    title = {'text': "Average Failure Probability"},
+                    gauge = {'axis': {'range': [0, 1]},
+                             'bar': {'color': "red"},
+                             'steps' : [
+                                 {'range': [0, 0.5], 'color': "green"},
+                                 {'range': [0.5, 0.8], 'color': "yellow"},
+                                 {'range': [0.8, 1], 'color': "red"}]}))
+                st.plotly_chart(fig)
+            except Exception as e:
+                st.error(f"Error during preprocessing or prediction: {e}")
+
+# ------------------ Single Record ------------------
+else:
+    st.subheader("Enter single sample values")
+    
+    input_data = {}
+    # Dynamically create input fields for every feature
+    for feature in feature_cols:
+        if feature == "Type":
+            val = st.selectbox("Type", options=["H","L","M"], index=1)
+            input_data[feature] = {"H":0,"L":1,"M":2}.get(val,1)
+        elif feature == "Temp_Diff":
+            # Compute automatically later
+            continue
+        else:
+            val = st.number_input(feature, value=0.0)
+            input_data[feature] = val
+
+    # Convert to DataFrame
+    input_df = pd.DataFrame([input_data])
+
+    # Compute Temp_Diff if missing
+    if "Temp_Diff" in feature_cols and "Temp_Diff" not in input_df.columns:
+        if "Process_temperature_K" in input_df.columns and "Air_temperature_K" in input_df.columns:
+            input_df["Temp_Diff"] = input_df["Process_temperature_K"] - input_df["Air_temperature_K"]
+        else:
+            input_df["Temp_Diff"] = 0.0
+
+    st.write("Input features used for prediction:")
+    st.dataframe(input_df.T)
+
+    if scaler is None:
+        st.error("Scaler not found.")
+    else:
+        try:
             X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
             probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
-            preds = (probs >= 0.5).astype(int)
+            pred = int((probs >= 0.5).astype(int)[0])
+            st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
 
-            out = input_df.copy()
-            out["failure_prob"] = probs
-            out["predicted_failure"] = preds
-            st.subheader("Predictions (first 20 rows)")
-            st.dataframe(out.head(20))
-
-            # Probability distribution
-            st.subheader("Predicted failure probability distribution")
-            st.bar_chart(pd.Series(probs).value_counts().sort_index())
-
-            # Gauge for average probability
-            avg_prob = probs.mean()
+            # Gauge chart
             fig = go.Figure(go.Indicator(
                 mode = "gauge+number",
-                value = float(avg_prob),
+                value = float(probs[0]),
                 domain = {'x': [0, 1], 'y': [0, 1]},
-                title = {'text': "Average Failure Probability"},
+                title = {'text': "Failure Probability"},
                 gauge = {'axis': {'range': [0, 1]},
                          'bar': {'color': "red"},
                          'steps' : [
@@ -127,60 +179,5 @@ if mode == "Upload CSV":
                              {'range': [0.5, 0.8], 'color': "yellow"},
                              {'range': [0.8, 1], 'color': "red"}]}))
             st.plotly_chart(fig)
-
-# ------------------ Single Record ------------------
-else:
-    st.subheader("Enter single sample values")
-
-    # Prepare input dict dynamically from feature_cols
-    input_data = {}
-    for col in feature_cols:
-        if "air" in col.lower() and "temp" in col.lower():
-            input_data[col] = st.number_input(f"{col}", value=298.2)
-        elif "process" in col.lower() and "temp" in col.lower():
-            input_data[col] = st.number_input(f"{col}", value=308.6)
-        elif "rotational" in col.lower():
-            input_data[col] = st.number_input(f"{col}", value=1400)
-        elif "torque" in col.lower():
-            input_data[col] = st.number_input(f"{col}", value=45.0)
-        elif "tool" in col.lower():
-            input_data[col] = st.number_input(f"{col}", value=5.0)
-        elif col == "Type":
-            type_val = st.selectbox("Type", options=["H","L","M"], index=1)
-            input_data[col] = {"H":0,"L":1,"M":2}[type_val]
-        else:
-            input_data[col] = 0.0
-
-    # Compute Temp_Diff if feature exists
-    if "Temp_Diff" in feature_cols and "Temp_Diff" not in input_data:
-        air_col = next((c for c in feature_cols if "air" in c.lower() and "temp" in c.lower()), None)
-        proc_col = next((c for c in feature_cols if "process" in c.lower() and "temp" in c.lower()), None)
-        if air_col and proc_col:
-            input_data["Temp_Diff"] = input_data[proc_col] - input_data[air_col]
-
-    # Make DataFrame
-    input_df = pd.DataFrame([input_data])
-    st.write("Input features used for prediction:")
-    st.dataframe(input_df.T)
-
-    if scaler is None:
-        st.error("Scaler not found.")
-    else:
-        X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-        probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
-        pred = int((probs >= 0.5).astype(int)[0])
-        st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
-
-        # Gauge chart
-        fig = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = float(probs[0]),
-            domain = {'x': [0, 1], 'y': [0, 1]},
-            title = {'text': "Failure Probability"},
-            gauge = {'axis': {'range': [0, 1]},
-                     'bar': {'color': "red"},
-                     'steps' : [
-                         {'range': [0, 0.5], 'color': "green"},
-                         {'range': [0.5, 0.8], 'color': "yellow"},
-                         {'range': [0.8, 1], 'color': "red"}]}))
-        st.plotly_chart(fig)
+        except Exception as e:
+            st.error(f"Error during preprocessing or prediction: {e}")
