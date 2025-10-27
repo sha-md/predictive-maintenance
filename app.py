@@ -7,26 +7,17 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="Predictive Maintenance", layout="wide")
 
-# --------- Feature order ----------
-FEATURE_ORDER = [
-    "Air temperature [K]",
-    "Process temperature [K]",
-    "Rotational speed [rpm]",
-    "Torque [Nm]",
-    "Tool wear [min]",
-    "Temp Diff",
-    "Type"
-]
-
 # --------- Utilities ----------
 def preprocess_input(df, feature_cols, scaler):
-    """Prepare input dataframe for model prediction with exact feature names and order"""
+    """Prepare input dataframe for model prediction with original feature names"""
     df = df.copy()
 
-    # Create Temp Diff if missing
+    # Compute Temp Diff if missing
     if "Temp Diff" in feature_cols and "Temp Diff" not in df.columns:
-        if "Process temperature [K]" in df.columns and "Air temperature [K]" in df.columns:
-            df["Temp Diff"] = df["Process temperature [K]"] - df["Air temperature [K]"]
+        air_col = [c for c in df.columns if "Air" in c][0] if any("Air" in c for c in df.columns) else None
+        proc_col = [c for c in df.columns if "Process" in c][0] if any("Process" in c for c in df.columns) else None
+        if air_col and proc_col:
+            df["Temp Diff"] = df[proc_col] - df[air_col]
         else:
             df["Temp Diff"] = 0.0
 
@@ -39,7 +30,7 @@ def preprocess_input(df, feature_cols, scaler):
         if col not in df.columns:
             df[col] = 0.0
 
-    # Keep only columns in feature_cols in the correct order
+    # Keep only columns in feature_cols in correct order
     X = df[feature_cols]
 
     # Scale
@@ -49,6 +40,7 @@ def preprocess_input(df, feature_cols, scaler):
 # --------- Load artifacts ----------
 MODEL_PATH = "models/best_model.pkl"
 SCALER_PATH = "models/scaler.pkl"
+FEATURES_PATH = "models/feature_columns.json"
 METRICS_PATH = "models/metrics.json"
 
 if not os.path.exists(MODEL_PATH):
@@ -58,10 +50,23 @@ if not os.path.exists(MODEL_PATH):
 model = joblib.load(MODEL_PATH)
 scaler = joblib.load(SCALER_PATH) if os.path.exists(SCALER_PATH) else None
 
+with open(FEATURES_PATH, "r") as f:
+    feature_cols = json.load(f)
+
 metrics = {}
 if os.path.exists(METRICS_PATH):
     with open(METRICS_PATH, "r") as f:
         metrics = json.load(f)
+
+# --------- Feature name mapping ----------
+COLUMN_MAP = {
+    "Air_temperature_K": "Air temperature [K]",
+    "Process_temperature_K": "Process temperature [K]",
+    "Rotational_speed_rpm": "Rotational speed [rpm]",
+    "Torque_Nm": "Torque [Nm]",
+    "Tool_wear_min": "Tool wear [min]",
+    "Temp_Diff": "Temp Diff"
+}
 
 # --------- Header ----------
 st.title("⚙️ Predictive Maintenance — Machine Failure Predictor")
@@ -87,6 +92,8 @@ if mode == "Upload CSV":
     if uploaded_file is not None:
         try:
             input_df = pd.read_csv(uploaded_file)
+            # Rename columns to match model
+            input_df = input_df.rename(columns=COLUMN_MAP)
             st.write("Uploaded sample:")
             st.dataframe(input_df.head())
         except Exception as e:
@@ -97,9 +104,7 @@ if mode == "Upload CSV":
             st.error("Scaler not found. Cannot preprocess.")
         else:
             try:
-                # Reorder and preprocess
-                X_raw, X_scaled = preprocess_input(input_df, FEATURE_ORDER, scaler)
-
+                X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
                 # Predict
                 probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
                 preds = (probs >= 0.5).astype(int)
@@ -134,24 +139,24 @@ if mode == "Upload CSV":
 # ------------------ Single Record ------------------
 else:
     st.subheader("Enter single sample values")
-
+    
     input_data = {}
     # Dynamically create input fields for every feature
-    for feature in FEATURE_ORDER:
+    for feature in feature_cols:
         if feature == "Type":
             val = st.selectbox("Type", options=["H","L","M"], index=1)
             input_data[feature] = {"H":0,"L":1,"M":2}.get(val,1)
         elif feature == "Temp Diff":
-            continue  # Will compute later
+            # Compute automatically later
+            continue
         else:
             val = st.number_input(feature, value=0.0)
             input_data[feature] = val
 
     # Convert to DataFrame
     input_df = pd.DataFrame([input_data])
-
     # Compute Temp Diff if missing
-    if "Temp Diff" in FEATURE_ORDER and "Temp Diff" not in input_df.columns:
+    if "Temp Diff" in feature_cols and "Temp Diff" not in input_df.columns:
         if "Process temperature [K]" in input_df.columns and "Air temperature [K]" in input_df.columns:
             input_df["Temp Diff"] = input_df["Process temperature [K]"] - input_df["Air temperature [K]"]
         else:
@@ -164,7 +169,7 @@ else:
         st.error("Scaler not found.")
     else:
         try:
-            X_raw, X_scaled = preprocess_input(input_df, FEATURE_ORDER, scaler)
+            X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
             probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
             pred = int((probs >= 0.5).astype(int)[0])
             st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
