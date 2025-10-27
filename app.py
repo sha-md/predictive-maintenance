@@ -147,18 +147,28 @@ else:
     type_val = st.selectbox("Type", options=["H","L","M"], index=1)
     type_mapping = {"H":0,"L":1,"M":2}
 
-    # Build input row
+    # Build input row aligned with feature_cols
     row = {}
     for c in feature_cols:
-        row[c] = 0.0
-    row["Air_temperature_K"] = air_temp
-    row["Process_temperature_K"] = proc_temp
-    row["Rotational_speed_rpm"] = rpm
-    row["Torque_Nm"] = torque
-    row["Tool_wear_min"] = wear
-    row["Type"] = type_mapping.get(type_val, 1)
-    row["Temp_Diff"] = proc_temp - air_temp
+        # Assign values if known, else 0.0
+        if "Air" in c and "Temp" in c:
+            row[c] = air_temp
+        elif "Process" in c and "Temp" in c:
+            row[c] = proc_temp
+        elif "Rotational" in c:
+            row[c] = rpm
+        elif "Torque" in c:
+            row[c] = torque
+        elif "Tool" in c:
+            row[c] = wear
+        elif c == "Type":
+            row[c] = type_mapping.get(type_val, 1)
+        elif c == "Temp_Diff":
+            row[c] = proc_temp - air_temp
+        else:
+            row[c] = 0.0  # fill missing features
 
+    # Make DataFrame
     input_df = pd.DataFrame([row])
     st.write("Input features used for prediction:")
     st.dataframe(input_df.T)
