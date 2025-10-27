@@ -1,1 +1,9 @@
-["Air_temperature_K", "Process_temperature_K", "Type", "Rotational_speed_rpm", "Torque_Nm", "Tool_wear_min", "Temp_Diff"]
+[
+    "Air temperature [K]",
+    "Process temperature [K]",
+    "Rotational speed [rpm]",
+    "Torque [Nm]",
+    "Tool wear [min]",
+    "Temp Diff",
+    "Type"
+]
