@@ -12,33 +12,34 @@ def clean_colname(c):
     return c.replace(" ", "_").replace("[","").replace("]","").replace("<","lt").replace(">","gt")
 
 def preprocess_input(df, feature_cols, scaler):
-    """Prepare input dataframe for model prediction"""
+    """Prepare input dataframe for model prediction with original feature names"""
     df = df.copy()
-    df.columns = [clean_colname(c) for c in df.columns]
 
-    # Create Temp_Diff if possible
-    if "Temp_Diff" not in df.columns:
+    # Create Temp Diff if possible
+    if "Temp Diff" in feature_cols and "Temp Diff" not in df.columns:
         air_cols = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
         proc_cols = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
         if air_cols and proc_cols:
-            df["Temp_Diff"] = df[proc_cols[0]] - df[air_cols[0]]
+            df["Temp Diff"] = df[proc_cols[0]] - df[air_cols[0]]
+        else:
+            df["Temp Diff"] = 0.0
 
-    # Map Type to numeric if exists
+    # Map Type column to numeric
     if "Type" in df.columns:
         df["Type"] = df["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
 
-    # Warn if columns are missing or extra
-    missing_cols = [c for c in feature_cols if c not in df.columns]
-    extra_cols = [c for c in df.columns if c not in feature_cols]
-    if missing_cols:
-        st.warning(f"Missing columns in input. Filled with 0: {missing_cols}")
-    if extra_cols:
-        st.warning(f"Ignored extra columns: {extra_cols}")
+    # Fill missing columns with 0
+    for col in feature_cols:
+        if col not in df.columns:
+            df[col] = 0.0
 
-    # Reindex to match training features exactly
-    X = df.reindex(columns=feature_cols, fill_value=0.0)
+    # Keep only columns in feature_cols in the correct order
+    X = df[feature_cols]
+
+    # Scale
     X_scaled = scaler.transform(X)
     return X, X_scaled
+
 
 # --------- Load artifacts ----------
 MODEL_PATH = "models/best_model.pkl"
