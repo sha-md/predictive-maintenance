@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib, json, os
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Predictive Maintenance", layout="wide")
@@ -13,15 +12,23 @@ def clean_colname(c):
     return c.replace(" ", "_").replace("[","").replace("]","").replace("<","lt").replace(">","gt")
 
 def preprocess_input(df, feature_cols, scaler):
+    """
+    Preprocess input DataFrame to match training features:
+    - Cleans column names
+    - Adds missing features with 0
+    - Computes Temp_Diff if needed
+    - Maps Type H/L/M to numeric
+    - Scales features
+    """
     df = df.copy()
     df.columns = [clean_colname(c) for c in df.columns]
 
-    # Create Temp_Diff if not exists
+    # Compute Temp_Diff if not present
     if "Temp_Diff" not in df.columns:
-        candidates_air = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
-        candidates_proc = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
-        if candidates_air and candidates_proc:
-            df["Temp_Diff"] = df[candidates_proc[0]] - df[candidates_air[0]]
+        air_cols = [c for c in df.columns if "air" in c.lower() and "temp" in c.lower()]
+        proc_cols = [c for c in df.columns if "process" in c.lower() and "temp" in c.lower()]
+        if air_cols and proc_cols:
+            df["Temp_Diff"] = df[proc_cols[0]] - df[air_cols[0]]
 
     # Ensure all feature columns exist
     X = pd.DataFrame(columns=feature_cols)
@@ -31,7 +38,7 @@ def preprocess_input(df, feature_cols, scaler):
         else:
             X[col] = 0.0
 
-    # Map Type column to numeric
+    # Map Type column if exists
     if "Type" in X.columns:
         X["Type"] = X["Type"].replace({"H":0,"L":1,"M":2}).astype(float)
 
@@ -93,11 +100,7 @@ if mode == "Upload CSV":
             st.error("Scaler not found. Cannot preprocess.")
         else:
             X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-            # Predict
-            if hasattr(model, "predict_proba"):
-                probs = model.predict_proba(X_scaled)[:,1]
-            else:
-                probs = model.predict(X_scaled)
+            probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
             preds = (probs >= 0.5).astype(int)
 
             out = input_df.copy()
@@ -128,60 +131,43 @@ if mode == "Upload CSV":
 # ------------------ Single Record ------------------
 else:
     st.subheader("Enter single sample values")
-    
-    sample_path = "models/sample_input.csv"
-    sample_vals = {}
-    if os.path.exists(sample_path):
-        sample = pd.read_csv(sample_path)
-        sample0 = sample.iloc[0].to_dict()
-        sample_vals = sample0
 
-    # Input fields
-    air_temp = st.number_input("Air Temperature [K]", value=float(sample_vals.get("Air_temperature_K", 298.2)))
-    proc_temp = st.number_input("Process Temperature [K]", value=float(sample_vals.get("Process_temperature_K", 308.6)))
-    rpm = st.number_input("Rotational Speed [rpm]", value=float(sample_vals.get("Rotational_speed_rpm", 1400)))
-    torque = st.number_input("Torque [Nm]", value=float(sample_vals.get("Torque_Nm", 45.0)))
-    wear = st.number_input("Tool Wear [min]", value=float(sample_vals.get("Tool_wear_min", 5.0)))
-    
-    # Type selection
-    type_val = st.selectbox("Type", options=["H","L","M"], index=1)
-    type_mapping = {"H":0,"L":1,"M":2}
-
-    # Build input row aligned with feature_cols
-    row = {}
-    for c in feature_cols:
-        # Assign values if known, else 0.0
-        if "Air" in c and "Temp" in c:
-            row[c] = air_temp
-        elif "Process" in c and "Temp" in c:
-            row[c] = proc_temp
-        elif "Rotational" in c:
-            row[c] = rpm
-        elif "Torque" in c:
-            row[c] = torque
-        elif "Tool" in c:
-            row[c] = wear
-        elif c == "Type":
-            row[c] = type_mapping.get(type_val, 1)
-        elif c == "Temp_Diff":
-            row[c] = proc_temp - air_temp
+    # Prepare input dict dynamically from feature_cols
+    input_data = {}
+    for col in feature_cols:
+        if "air" in col.lower() and "temp" in col.lower():
+            input_data[col] = st.number_input(f"{col}", value=298.2)
+        elif "process" in col.lower() and "temp" in col.lower():
+            input_data[col] = st.number_input(f"{col}", value=308.6)
+        elif "rotational" in col.lower():
+            input_data[col] = st.number_input(f"{col}", value=1400)
+        elif "torque" in col.lower():
+            input_data[col] = st.number_input(f"{col}", value=45.0)
+        elif "tool" in col.lower():
+            input_data[col] = st.number_input(f"{col}", value=5.0)
+        elif col == "Type":
+            type_val = st.selectbox("Type", options=["H","L","M"], index=1)
+            input_data[col] = {"H":0,"L":1,"M":2}[type_val]
         else:
-            row[c] = 0.0  # fill missing features
+            input_data[col] = 0.0
+
+    # Compute Temp_Diff if feature exists
+    if "Temp_Diff" in feature_cols and "Temp_Diff" not in input_data:
+        air_col = next((c for c in feature_cols if "air" in c.lower() and "temp" in c.lower()), None)
+        proc_col = next((c for c in feature_cols if "process" in c.lower() and "temp" in c.lower()), None)
+        if air_col and proc_col:
+            input_data["Temp_Diff"] = input_data[proc_col] - input_data[air_col]
 
     # Make DataFrame
-    input_df = pd.DataFrame([row])
+    input_df = pd.DataFrame([input_data])
     st.write("Input features used for prediction:")
     st.dataframe(input_df.T)
 
-    # Preprocess and predict
     if scaler is None:
         st.error("Scaler not found.")
     else:
         X_raw, X_scaled = preprocess_input(input_df, feature_cols, scaler)
-        if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(X_scaled)[:,1]
-        else:
-            probs = model.predict(X_scaled)
+        probs = model.predict_proba(X_scaled)[:,1] if hasattr(model, "predict_proba") else model.predict(X_scaled)
         pred = int((probs >= 0.5).astype(int)[0])
         st.success(f"Predicted: {'Failure' if pred==1 else 'No Failure'} — Probability of failure: {probs[0]:.3f}")
 
