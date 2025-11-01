@@ -14,11 +14,7 @@ Machine failure prediction using classical ML & Deep Learning to minimize downti
 6. [Results](#results)  
 7. [Interpretability](#interpretability)  
 8. [Streamlit App](#streamlit-app)  
-9. [Aligned Coursework](#aligned-coursework)  
-10. [Cost Savings Impact](#cost-savings-impact)  
-11. [Future Improvements](#future-improvements)  
-12. [Installation](#installation)  
-13. [Project Structure](#project-structure)
+
 
 ---
 
