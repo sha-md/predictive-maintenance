@@ -10,12 +10,12 @@ A machine learning and deep learning project that predicts **machine failures** 
 - [Why This Project Matters](#why-this-project-matters)
 - [Dataset](#dataset)
 - [Data Preprocessing](#data-preprocessing)
-- [Engineering & MLOps Foundations](#engineering---mLOps-Foundations)
+- [Engineering and MLOps Foundations](#engineering-and-mlops-foundations)
 - [Modeling](#modeling)
 - [Interpretability](#interpretability)
 - [Cost–Benefit Impact](#costbenefit-impact)
 - [Results](#results)
-- [Analytics & BI Layer](#analytics---bi-layer)
+- [Analytics and BI Layer](#analytics-and-bi-layer)
 - [Streamlit Web App](#streamlit-web-app)
 - [Author](#author)
 
@@ -92,7 +92,7 @@ All preprocessing steps were integrated into a reproducible pipeline.
 ---
 
 
-## Engineering & MLOps Foundations
+## Engineering and MLOps Foundations
 
 This project applies foundational MLOps and analytics engineering practices to ensure reproducibility, interpretability, and downstream usability:
 - Reproducible preprocessing pipelines for feature engineering and class balancing.
@@ -127,7 +127,7 @@ Compared several machine learning models and a deep neural network:
 
 ## Interpretability
 
-Understanding *why* a model predicts failure is as important as accuracy.
+Understanding why a model predicts failure is as important as accuracy.
 
 Feature importance analysis (from Random Forest and SHAP values) revealed:
 - **Torque** and **Tool wear** were the strongest predictors of machine failure.  
@@ -163,7 +163,7 @@ Model performance metrics were aligned with business KPIs to ensure consistency 
 
 ---
 
-## Analytics & BI Layer
+## Analytics and BI Layer
 
 This project extends beyond model training by translating machine learning outputs into business-consumable analytics.
 A BI-optimized dataset was engineered from the original telemetry data, consolidating raw failure flags into interpretable categories and aligning metrics across ML and analytics layers.
