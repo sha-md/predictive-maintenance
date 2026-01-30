@@ -10,10 +10,12 @@ A machine learning and deep learning project that predicts **machine failures** 
 - [Why This Project Matters](#why-this-project-matters)
 - [Dataset](#dataset)
 - [Data Preprocessing](#data-preprocessing)
+- [Engineering & MLOps Foundations](#engineering---mLOps-Foundations)
 - [Modeling](#modeling)
 - [Interpretability](#interpretability)
 - [Cost–Benefit Impact](#costbenefit-impact)
 - [Results](#results)
+- [Analytics & BI Layer](#analytics---bi-layer)
 - [Streamlit Web App](#streamlit-web-app)
 - [Author](#author)
 
@@ -21,7 +23,7 @@ A machine learning and deep learning project that predicts **machine failures** 
 
 ## Project Overview
 
-This project leverages **Machine Learning** and **Deep Learning** to predict whether industrial machines are at risk of failure.  
+This project implements an **end-to-end machine learning system with deployment and analytics integration** to predict whether industrial machines are at risk of failure.
 It includes a complete end-to-end workflow — from **data cleaning and feature engineering** to **model comparison** and **deployment**.
 
 The model helps manufacturing teams **identify warning signals early** and take corrective action before failures occur.  
@@ -89,6 +91,23 @@ All preprocessing steps were integrated into a reproducible pipeline.
 
 ---
 
+
+## Engineering & MLOps Foundations
+
+This project applies foundational MLOps and analytics engineering practices to ensure reproducibility, interpretability, and downstream usability:
+- Reproducible preprocessing pipelines for feature engineering and class balancing.
+- Clear separation of concerns:
+  - Python for data preparation, feature engineering, and modeling.
+  - BI tools for aggregation, visualization, and stakeholder insights.
+- Consistent KPI definitions across ML evaluation and BI dashboards.
+- Version-controlled code and data artifacts using GitHub.
+- Model outputs designed for downstream consumption (dashboards and applications).
+
+This architecture enables future extensions such as automated retraining, monitoring, and CI/CD-based deployment.
+
+
+-----
+
 ## Modeling
 
 Compared several machine learning models and a deep neural network:
@@ -140,8 +159,29 @@ Predictive analytics translates into **both operational resilience and financial
 - DNN achieved competitive results with balanced precision–recall metrics  
 
 The final model was integrated into an intuitive web dashboard for business decision-makers.
+Model performance metrics were aligned with business KPIs to ensure consistency between model evaluation and operational dashboards.
 
 ---
+
+## Analytics & BI Layer
+
+This project extends beyond model training by translating machine learning outputs into business-consumable analytics.
+A BI-optimized dataset was engineered from the original telemetry data, consolidating raw failure flags into interpretable categories and aligning metrics across ML and analytics layers.
+
+**Power BI Dashboard Highlights:**
+- Overall Failure Rate KPI — 3.39% machine failure incidence.
+- Failure Count by Type — Heat Dissipation Failure identified as the dominant failure mode.
+- Failure vs No Failure Distribution — illustrates fleet-wide reliability.
+- Failures by Machine Type — highlights machine categories with elevated risk.
+- Failure Rate vs Tool Wear — demonstrates increasing failure probability beyond wear thresholds.
+
+**Business Value:**
+- Enables maintenance teams to prioritize inspections based on dominant failure modes.
+- Supports preventive maintenance scheduling using tool-wear risk signals.
+- Bridges the gap between predictive models and operational decision-making.
+
+
+  ----
 
 ## Streamlit Web App
 
@@ -149,7 +189,8 @@ Live Demo: **[Open Predictive Maintenance App](https://predictive-maintenance-dh
 
 Features:
 - Input live machine readings to predict failure probability  
-- Real-time visualization of sensor thresholds  
+- Real-time visualization of sensor thresholds
+- Designed for non-technical users to assess failure risk and support maintenance decisions.  
 
 
 Technologies used: **Streamlit • Scikit-learn • TensorFlow/Keras • XGBoost • Pandas**
@@ -159,6 +200,6 @@ Technologies used: **Streamlit • Scikit-learn • TensorFlow/Keras • XGBoost
 ## Author
 
 **Shabnam Begam Mahammad**  
-[LinkedIn](https://www.linkedin.com/in/shabnam-b-mahammad) | [Email](mailto:shabnam71.md@gmail.com) 
+[LinkedIn](https://www.linkedin.com/in/shabnam-b-mahammad) | [Email](mailto:md.shabnam21@gmail.com) 
 
 “Turning predictive analytics into operational intelligence.”
